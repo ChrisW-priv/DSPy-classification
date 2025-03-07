@@ -1,51 +1,93 @@
-import dspy 
+from typing import Iterable, List
+import dspy
 
 
 CategoryType = str | dict[str, str]
 
+
 class ClassifySignature(dspy.Signature):
     """Given available categories, categorize `text` to one of them"""
-    categories: list[CategoryType] = dspy.InputField(description='available categories')
-    text: str = dspy.InputField(description='text to categorize')
-    category: str = dspy.OutputField(description='category of text based on available categories')
+
+    categories: List[CategoryType] = dspy.InputField(description="available categories")
+    text: str = dspy.InputField(description="text to categorize")
+    category: str = dspy.OutputField(
+        description="category of text based on available categories"
+    )
 
 
 class ClassifierModule(dspy.Module):
     def __init__(self, categories) -> None:
         super().__init__()
         self.categories = categories
-        self.pred = dspy.Predict()
+        self.pred = dspy.Predict(ClassifySignature)
 
     def forward(self, text: str) -> str:
-        prediction = self.pred(text)
+        prediction = self.pred(categories=self.categories, text=text)
         return prediction.category
 
 
-def main(text: str):
-    categories = [
-        {
-            'category': 'misc',
-            'description': 'No category matches this text',
-        },
-        {
-            'category': 'ok',
-            'description': 'there was nothing wrong',
-        },
-        {
-            'category': 'missing values',
-            'description': 'There was something mising in the document',
-        },
+def validate_category(example, prediction, trace=None):
+    return prediction.category == example.category
+
+
+def optimize_for_categories(classify, trainset, **kwargs):
+    tp = dspy.MIPROv2(metric=validate_category, auto="light")
+    optimized_classify = tp.compile(classify, trainset=trainset, **kwargs)
+    return optimized_classify
+
+
+def build_trainset(text_category_zipped: Iterable):
+    return [
+        dspy.Example(
+            text=text,
+            category=category,
+        ).with_inputs("categories", "text")
+        for text, category in text_category_zipped
     ]
-    cat_module = ClassifierModule(categories)
-    predicted_cat = cat_module(text)
-    return predicted_cat
 
 
 if __name__ == "__main__":
-    cat = main("cat sat on a mat")
+    gpt_4o_mini = dspy.LM('openai/gpt-4o-mini')
+    dspy.configure(lm=gpt_4o_mini)
+
+    print("Starting...")
+    categories = [
+        {
+            "category": "misc",
+            "description": "No category matches this text",
+        },
+        {
+            "category": "ok",
+            "description": "there was nothing wrong",
+        },
+        {
+            "category": "missing values",
+            "description": "There was something mising in the document",
+        },
+    ]
+    classify = ClassifierModule(categories)
+    x1 =  "cat sat on a mat"
+    cat = classify(x1)
     print(cat)
-    cat = main("nothing to declare")
+    x2 =  "nothing to declare"
+    cat = classify(x2)
     print(cat)
-    cat = main("missing declaration")
+    x3 =  "missing declaration"
+    cat = classify(x3)
     print(cat)
 
+    trainset = build_trainset([(x1, "misc"), (x2, "ok"), (x3, "missing values"),])
+    optimized = optimize_for_categories(classify, trainset)
+
+    classify = optimized
+    x1 =  "cat sat on a mat"
+    cat = classify(x1)
+    print(cat)
+    x2 =  "nothing to declare"
+    cat = classify(x2)
+    print(cat)
+    x3 =  "missing declaration"
+    cat = classify(x3)
+    print(cat)
+
+    
