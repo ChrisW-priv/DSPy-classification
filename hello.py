@@ -1,8 +1,11 @@
 from typing import Iterable, List
 import dspy
+from pydantic import BaseModel
 
 
-CategoryType = str | dict[str, str]
+class CategoryType(BaseModel):
+    category: str
+    description: str
 
 
 class ClassifySignature(dspy.Signature):
@@ -27,7 +30,7 @@ class ClassifierModule(dspy.Module):
 
 
 def validate_category(example, prediction, trace=None):
-    return prediction.category == example.category
+    return prediction == example.category
 
 
 def optimize_for_categories(classify, trainset, **kwargs):
@@ -41,7 +44,7 @@ def build_trainset(text_category_zipped: Iterable):
         dspy.Example(
             text=text,
             category=category,
-        ).with_inputs("categories", "text")
+        ).with_inputs("text")
         for text, category in text_category_zipped
     ]
 
@@ -52,18 +55,18 @@ if __name__ == "__main__":
 
     print("Starting...")
     categories = [
-        {
+        CategoryType(**{
             "category": "misc",
             "description": "No category matches this text",
-        },
-        {
+        }),
+        CategoryType(**{
             "category": "ok",
             "description": "there was nothing wrong",
-        },
-        {
+        }),
+        CategoryType(**{
             "category": "missing values",
             "description": "There was something mising in the document",
-        },
+        }),
     ]
     classify = ClassifierModule(categories)
     x1 =  "cat sat on a mat"
@@ -77,7 +80,7 @@ if __name__ == "__main__":
     print(cat)
 
     trainset = build_trainset([(x1, "misc"), (x2, "ok"), (x3, "missing values"),])
-    optimized = optimize_for_categories(classify, trainset)
+    optimized = optimize_for_categories(classify, trainset, requires_permission_to_run=False, provide_traceback=True)
 
     classify = optimized
     x1 =  "cat sat on a mat"
